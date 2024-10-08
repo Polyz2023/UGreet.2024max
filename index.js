@@ -171,7 +171,25 @@ const GetPostByPUID = async (puid) => {
     }
 };
 
+const GetAllPosts = async () => {
+    try{
+        const usersCollectionRef = collection(firestore, 'users');
+        const usersSnapshot = await getDocs(usersCollectionRef);
 
+        let AllPosts = [];
+
+        usersSnapshot.forEach((userDoc) => {
+            const userData = userDoc.data();
+
+            AllPosts = [...AllPosts, ...userData.Posts.map(post=>({...post}))];
+        });
+
+        console.log("All posts getted");
+        return AllPosts;
+    } catch (error){
+        console.log("Error to get all posts: " + error);
+    }
+}
 
 web.use(bodyParser.json({ limit: '50mb' }));
 web.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
@@ -248,6 +266,15 @@ web.post('/account/posts/getbypuid', async (req, res) => {
     }
 });
 
+web.post('/account/posts/getall', async (req, res) => {
+    try{
+        const AllPosts = await GetAllPosts();
+        res.status(200).json({message:"All posts getted", posts:AllPosts});
+        console.log("LOOOOOOOg")
+    } catch (error) {
+        res.status(500).json({error: error.message});
+    }
+});
 
 web.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
