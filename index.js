@@ -171,7 +171,7 @@ const GetPostByPUID = async (puid) => {
         }
 
         if (foundPost) {
-            console.log("Пост найден:", foundPost);
+            console.log("Пост найден:");
             return foundPost;
         } else {
             throw new Error('Пост с таким PUID не найден');
@@ -219,13 +219,54 @@ const GetUser = async (username) => {
             }
         }
 
-        console.log("Succefuly find user: " + user);
+        console.log("Succefuly find user: " );
         return user;
     } catch (error){
         console.log("Error to find user: " + error);
         return null;
     }
 } 
+
+const GetJointChatGroupMessages = async () => {
+    try {
+        const DocRef = doc(firestore, 'Chats', 'JOINT');
+        const DocSnapshot = await getDoc(DocRef);
+        if (DocSnapshot.exists()) {
+            const Data = DocSnapshot.data();
+            console.log("Data Joint Chat from FireStore:", Data);
+            return Data;
+        } else {
+            console.log("No data found for joint chat.");
+            return { Messages: [] }; // Если данных нет, возвращаем пустой объект с пустым массивом Messages
+        }
+    } catch (error) {
+        console.error("Error getting data from FireStore:", error);
+        return { Messages: [] }; // В случае ошибки тоже возвращаем пустой объект
+    }
+}
+
+
+const SaveJointChatGroupMessages = async (data) => {
+    try {
+        const Data = await GetJointChatGroupMessages();
+        console.log("Data Joint Chat from FireStore before update:", Data);
+
+        if (!Data.Messages) {
+            Data.Messages = [];
+        }
+
+        Data.Messages.push(data);
+
+        const DocRef = doc(firestore, 'Chats', "JOINT");
+        await setDoc(DocRef, { Messages: Data.Messages }); // Обновляем только массив сообщений
+
+        console.log("New message saved");
+    } catch (error) {
+        console.error("Error saving data to FireStore:", error);
+    }
+}
+
+
 
 web.use(bodyParser.json({ limit: '50mb' }));
 web.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
@@ -327,15 +368,38 @@ web.post('/account/getdata/other', async (req, res) => {
     } 
 });
 
+var Messages_JointChat = [];
+
+web.post('/onlinechat/group/data', async (req, res) => {
+    try {
+        const JointGroupData = await GetJointChatGroupMessages();
+        Messages_JointChat = JointGroupData.Messages;
+        console.log(Messages_JointChat);
+        res.send(Messages_JointChat); // Отправляем загруженные сообщения как ответ на запрос
+    } catch (error) {
+        console.error("/onlinechat/group/data error", error);
+        res.status(500).send("Error retrieving chat messages");
+    }
+});
+
 const chatNamespace = io.of('/onlinechat/group');
 let connections = [];
 let online = 0;
-chatNamespace.on('connection', (socket) => {
+
+chatNamespace.on('connection', async (socket) => {
     connections.push(socket);
     online++;
-    console.log("Online joint group chat on " + online);
 
+    // Загружаем сообщения при каждом новом подключении
+    const JointGroupData = await GetJointChatGroupMessages();
+    Messages_JointChat = JointGroupData.Messages;
+    
+    console.log("Online joint group chat on " + online);
+    console.log(Messages_JointChat);
+
+    // Отправляем текущие сообщения новому пользователю
     chatNamespace.emit('online users', online);
+    chatNamespace.emit('messages data', Messages_JointChat);
 
     socket.on('disconnect', () => {
         connections.splice(connections.indexOf(socket), 1);
@@ -344,10 +408,14 @@ chatNamespace.on('connection', (socket) => {
         chatNamespace.emit('online users', online);
     });
 
-    socket.on('Send_Message', (data) => {
+    socket.on('Send_Message', async (data) => {
+        await SaveJointChatGroupMessages(data);
         chatNamespace.emit('Get_Message', { text: data.text, username: data.username, us_id: data.us_id });
+        console.log(Messages_JointChat);
     });
 });
+
+
 
 web.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
