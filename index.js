@@ -5,6 +5,17 @@ const cors = require("cors");
 const path = require("path");
 
 const web = express();
+
+const http = require('http');
+const server = http.createServer(web);
+const { Server } = require("socket.io");
+const io = new Server(server, {
+    cors: {
+      origin: "*",
+      methods: ["GET", "POST"]
+    }
+  }); 
+
 const { auth, firestore, storage } = require('./firebase'); 
 const { createUserWithEmailAndPassword, signInWithEmailAndPassword } = require("firebase/auth");
 const { doc, setDoc, getDoc, collection, getDocs } = require('firebase/firestore');
@@ -113,7 +124,7 @@ const GetRandomUser = async () => {
         const usersCollectionRef = collection(firestore, 'users'); // Получаем ссылку на коллекцию 'users'
         const usersSnapshot = await getDocs(usersCollectionRef); // Получаем все документы коллекции
         
-        const users = usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const users = usersSnapshot.docs.map(doc => ({usname:doc.username, id: doc.id, ...doc.data() }));
 
         if (users.length === 0) {
             throw new Error('Нет пользователей в базе данных');
@@ -154,7 +165,7 @@ const GetPostByPUID = async (puid) => {
             const post = userData.Posts.find(post => post.PUID === puid);
             
             if (post) {
-                foundPost = { ...post, userId: userDoc.id };
+                foundPost = { ...post, userId: userDoc.id, usname: userData.username };
                 break;
             }
         }
@@ -191,10 +202,39 @@ const GetAllPosts = async () => {
     }
 }
 
+const GetUser = async (username) => {
+    try{
+        const usersCollectionRef = collection(firestore,'users');
+        const userSnapshot = await getDocs(usersCollectionRef);
+
+        let user;
+
+        for(const userDoc of userSnapshot.docs){
+            const userData = userDoc.data();
+            const FUser = userData.username;
+
+            if(FUser == username){
+                user = userData;
+                break;
+            }
+        }
+
+        console.log("Succefuly find user: " + user);
+        return user;
+    } catch (error){
+        console.log("Error to find user: " + error);
+        return null;
+    }
+} 
+
 web.use(bodyParser.json({ limit: '50mb' }));
 web.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 web.use(cors());
 web.use(express.static(path.join(__dirname, 'dist')));
+web.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    next();
+  });
 
 web.post("/register", async (req, res) => {
     try {
@@ -276,12 +316,45 @@ web.post('/account/posts/getall', async (req, res) => {
     }
 });
 
+web.post('/account/getdata/other', async (req, res) => {
+    const {username} = req.body;
+    try{
+        const user = await GetUser(username);
+        res.status(200).json({message: "USer find", user: user});
+        console.log("USEEEEEEEEER FIIIIIIND YAPPI");
+    } catch (error) {
+        res.status(500).json({error: error.message});
+    } 
+});
+
+const chatNamespace = io.of('/onlinechat/group');
+let connections = [];
+let online = 0;
+chatNamespace.on('connection', (socket) => {
+    connections.push(socket);
+    online++;
+    console.log("Online joint group chat on " + online);
+
+    chatNamespace.emit('online users', online);
+
+    socket.on('disconnect', () => {
+        connections.splice(connections.indexOf(socket), 1);
+        online--;
+        console.log("Online joint group chat off " + online);
+        chatNamespace.emit('online users', online);
+    });
+
+    socket.on('Send_Message', (data) => {
+        chatNamespace.emit('Get_Message', { text: data.text, username: data.username, us_id: data.us_id });
+    });
+});
+
 web.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
 
 const PORT = process.env.PORT || 8452;
-web.listen(PORT, () => {
+server.listen(PORT, () => {
     console.log(`Server built successfully on port ${PORT}, and server: http://localhost:${PORT}`);
 });
